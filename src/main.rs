@@ -58,6 +58,9 @@ pub struct Opt {
     #[structopt(short, long)]
     /// Don't ask for confirmation before deleting
     disable_delete_confirmation: bool,
+    #[structopt(long = "ignore-directory", value_name = "directory")]
+    /// Ignore this directory during search
+    ignored_directories: Vec<PathBuf>,
 }
 
 fn main() {
@@ -91,6 +94,10 @@ fn try_main() -> Result<(), failure::Error> {
                 folder,
                 opts.apparent_size,
                 opts.disable_delete_confirmation,
+                opts.ignored_directories
+                    .iter()
+                    .filter_map(|path| path.canonicalize().ok())
+                    .collect(),
             );
         }
         Err(_) => failure::bail!("Failed to get stdout: are you trying to pipe 'diskonaut'?"),
@@ -105,6 +112,7 @@ pub fn start<B>(
     path: PathBuf,
     show_apparent_size: bool,
     disable_delete_confirmation: bool,
+    ignored_directories: Vec<PathBuf>,
 ) where
     B: Backend + Send + 'static,
 {
@@ -195,6 +203,15 @@ pub fn start<B>(
                         })
                         .skip_hidden(false)
                         .follow_links(false)
+                        .process_read_dir(move |_, entries| {
+                            entries.retain(|entry| match entry {
+                                Ok(dir_entry) => {
+                                    dir_entry.file_type().is_file()
+                                        || !ignored_directories.contains(&dir_entry.path())
+                                }
+                                _ => true,
+                            });
+                        })
                         .into_iter()
                     {
                         let instruction_sent = match entry {
